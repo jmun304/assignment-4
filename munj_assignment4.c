@@ -149,16 +149,14 @@ int main() {
                 if (!cmd->is_bg) {
                     int status;
                     waitpid(spawnpid, &status, 0);
-                    if (WIFSIGNALED(status)) {
+                    if (WIFEXITED(status)) {
+                        last_status = WEXITSTATUS(status);
+                    } else if (WIFSIGNALED(status)) {
                         int sig = WTERMSIG(status);
                         printf("terminated by signal %d\n", sig);
                         fflush(stdout);
                         last_status = sig;
                     }
-                    else if (WIFSIGNALED(status)) last_status = WTERMSIG(status);
-                }
-                else {
-                    printf("background pid is %d\n", spawnpid);
                 }
             }
         }

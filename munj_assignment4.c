@@ -109,7 +109,7 @@ int main() {
             cmd->is_bg = false;  
         }
 
-        else {
+        if (!cmd->is_bg || !foreground_only) {
             // Non built-in commands
             pid_t spawnpid = fork();
             if (spawnpid == -1) {

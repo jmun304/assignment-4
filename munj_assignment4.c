@@ -1,3 +1,5 @@
+#define _XOPEN_SOURCE 700
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,6 +11,8 @@
 
 #define INPUT_LENGTH 2048
 #define MAX_ARGS 512
+
+int foreground_only = 0;
 
 // Structure to store a command
 struct command_line {
@@ -46,7 +50,31 @@ struct command_line *parse_input() {
     return cmd;
 }
 
+void handle_SIGTSTP(int signo) {
+    char* msg;
+    if (foreground_only == 0) {
+        msg = "\nEntering foreground-only mode (& is now ignored)\n: ";
+        foreground_only = 1;
+    } else {
+        msg = "\nExiting foreground-only mode\n: ";
+        foreground_only = 0;
+    }
+    write(1, msg, strlen(msg));
+}
+
 int main() {
+    struct sigaction SIGINT_action = {0}, SIGTSTP_action = {0};
+    SIGINT_action.sa_handler = SIG_IGN; //No need to define handler
+    SIGTSTP_action.sa_handler = handle_SIGTSTP;
+    //No flags set
+    sigfillset(&SIGINT_action.sa_mask);
+    sigfillset(&SIGTSTP_action.sa_mask);
+    SIGINT_action.sa_flags = 0;
+    SIGTSTP_action.sa_flags = 0;
+    // Install our signal handler
+    sigaction(SIGINT, &SIGINT_action, NULL);    
+    sigaction(SIGTSTP, &SIGTSTP_action, NULL);
+
     struct command_line *cmd;
     int last_status = 0; // store status for "status" command
 
@@ -76,6 +104,11 @@ int main() {
         else if (strcmp(cmd->argv[0], "status") == 0) {
             printf("exit value %d\n", last_status);
         }
+
+        if (foreground_only && cmd->is_bg) {
+            cmd->is_bg = false;  
+        }
+
         else {
             // Non built-in commands
             pid_t spawnpid = fork();
@@ -85,6 +118,17 @@ int main() {
             }
             else if (spawnpid == 0) {
                 // Child process: handle input/output redirection
+                if (cmd->is_bg) {
+                    // Background: ignore SIGINT
+                    signal(SIGINT, SIG_IGN);
+                } else {
+                    // Foreground: default SIGINT
+                    signal(SIGINT, SIG_DFL);
+                }
+
+                // Always ignore SIGTSTP for children
+                signal(SIGTSTP, SIG_IGN);
+
                 if (cmd->input_file) {
                     int fd_in = open(cmd->input_file, O_RDONLY);
                     if (fd_in == -1) { perror("cannot open input file"); exit(1); }
@@ -105,7 +149,12 @@ int main() {
                 if (!cmd->is_bg) {
                     int status;
                     waitpid(spawnpid, &status, 0);
-                    if (WIFEXITED(status)) last_status = WEXITSTATUS(status);
+                    if (WIFSIGNALED(status)) {
+                        int sig = WTERMSIG(status);
+                        printf("terminated by signal %d\n", sig);
+                        fflush(stdout);
+                        last_status = sig;
+                    }
                     else if (WIFSIGNALED(status)) last_status = WTERMSIG(status);
                 }
                 else {
